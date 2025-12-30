@@ -4,7 +4,7 @@
 [Service]
 User=ec2-User
 Group=ec2-user
-WorkingDirectory=/home/ec2-user/fruits-veg_market/python
+WorkingDirectory=/home/ec2-user/fruits-veg_market/backend-api
 
 
 
