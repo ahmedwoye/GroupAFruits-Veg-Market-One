@@ -5,6 +5,7 @@ https://market.techbleat-stores.co.uk
 ![screenshot of app](image2.png)
 ![screenshot of app](image3.png)
 
+
 **A 3-Tier Architecture Project**
 
 - **HTML + JS** frontend (Tier 1) - fetches data
