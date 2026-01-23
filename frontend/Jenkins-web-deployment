@@ -31,7 +31,7 @@ pipeline {
                             git clone https://github.com/ahmedwoye/GroupAFruits-Veg-Market-One.git
 
                             # 3. Enter the repository folder first!
-                            cd fruits-veg_market 
+                            cd GroupAFruits-Veg-Market-One 
                             
                             # 4. Copy the frontend files to nginx directory
                             sudo cp frontend/index.html /usr/share/nginx/html/
