@@ -13,7 +13,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
 # DATABASE CONFIG
 # -----------------------------
 DATABASE_URL = (
-    "postgresql+psycopg://user:pass@db.server:5432/postgres"
+    "postgresql+psycopg://postgres:olasumbo.server:5432/postgres"
 )
 
 engine = create_engine(
