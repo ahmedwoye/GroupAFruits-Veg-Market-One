@@ -1,54 +1,44 @@
-pipeline  {
-    agent any 
-
-    parameters {
-        string (
-            name: 'PYTHON_NODE',
-            defaultValue: '172.31.16.456',
-            description: 'Enter the target Ec2 for Python App'
-        )
-
-        string (
-            name: 'WEB_NODE1',
-            defaultValue: '172.31.22.123',
-            description: 'Enter the target Ec2 for Web App'
-        )
-
-        string (
-            name: 'WEB_NODE2',
-            defaultValue: '172.31.22.123',
-            description: 'Enter the target Ec2 for Web App'
-        )
-
-         
-
-         
-    }
-    
+pipeline {
+    agent any
     stages {
         
-        stage ('Install Packages   SSH') {
-            
+        // --- Stage 1: Remote Installation ---
+        stage ('Installation of Packages') {
             steps {
-                sshagent (credentials: ['AWS-SSH-KEY']) {
+                sshagent (credentials: ['AWS_SSH_KEY']) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ec2-user@${WEB_NODE1}
-                        ssh -o StrictHostKeyChecking=no  ec2-user@${WEB_NODE2} '
-                        sudo yum install git -y; 
-                        sudo yum install nginx -y;
-                        sudo amazon-linux-extras install epel -y
-                        sudo yum install certbot python-certbot-nginx -y
-                        sudo systemctl start nginx; 
-                        cd ~; rm -rf fruits-veg_market ;
-                        git clone https://github.com/ahmedwoye/GroupAFruits-Veg-Market-One.git;
-                        cd fruits-veg_market;
-                        sed 's/FRUIT_MACHINE/${PYTHON_NODE}g'-i frontend/index.html;
-                        sudo cp frontend/index.html  /usr/share/nginx/html/ ' 
+                        ssh -o StrictHostKeyChecking=no ec2-user@108.131.1.87 '
+                            sudo yum install git -y;
+                            sudo yum install nginx -y;
+                            sudo systemctl start nginx;
+                            sudo systemctl enable nginx;
+                        '
                     """
                 }
+            }
+        }
+        
+        // --- Stage 2: Remote Deployment ---
+        stage ('Deployment') {
+            steps {
+                sshagent (credentials: ['AWS_SSH_KEY']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ec2-user@108.131.1.87 '
+                            # 1. Remove existing directory to prevent "already exists" error
+                            sudo rm -rf ~/fruits-veg_market &&
+                            
+                            # 2. Clone the specific branch
+                            git clone https://github.com/ahmedwoye/GroupAFruits-Veg-Market-One.git
 
+                            # 3. Enter the repository folder first!
+                            cd fruits-veg_market 
+                            
+                            # 4. Copy the frontend files to nginx directory
+                            sudo cp frontend/index.html /usr/share/nginx/html/
+                        '
+                    """
+                }
             }
         }
     }
 }
-
