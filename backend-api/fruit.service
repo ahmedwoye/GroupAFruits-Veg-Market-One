@@ -1,23 +1,15 @@
 [Unit]
-
+Description=FastAPI Market Backend
+After=network.target
 
 [Service]
-User=ec2-User
+User=ec2-user
 Group=ec2-user
 WorkingDirectory=/home/ec2-user/fruits-veg_market/backend-api
-
-
-
-ExecStart=/bin/bash -C 'source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000'
-
-Restart = always
+# The full path to python3 ensures we aren't relying on shell alias
+ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --app-dir /home/ec2-user/fruits-veg_market/backend-api
+Restart=always
 RestartSec=5
 
-
-Environment=PATH
-
-
-
-
-
 [Install]
+WantedBy=multi-user.target
