@@ -30,7 +30,7 @@ pipeline {
                         # 3. Running installation and start app
                         ssh -o StrictHostKeyChecking=no ec2-user@10.0.3.28 '
                             # Moving into the folder where main.py lives
-                            cd ~/fruits-veg_market/backend-api
+                            cd ~/GroupAFruits-Veg-Market-One/backend-api
                             
                             # Installing Pip if not present
                             sudo yum install python3-pip -y
