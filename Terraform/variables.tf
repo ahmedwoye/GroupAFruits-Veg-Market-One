@@ -1,5 +1,5 @@
 variable "aws_region" {
-  description = "AWS region to deploy into"
+  description = "AWS region for resources"
   type        = string
   default     = "eu-west-1"
 }
@@ -10,77 +10,56 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
-variable "public_subnet1_cidr" {
+variable "public_subnet_1_cidr" {
   description = "CIDR block for public subnet 1"
   type        = string
   default     = "10.0.1.0/24"
 }
 
-variable "public_subnet2_cidr" {
+variable "public_subnet_2_cidr" {
   description = "CIDR block for public subnet 2"
   type        = string
   default     = "10.0.2.0/24"
 }
 
-variable "private_subnet1_cidr" {
+variable "private_subnet_1_cidr" {
   description = "CIDR block for private subnet 1"
   type        = string
   default     = "10.0.3.0/24"
 }
 
-variable "private_subnet2_cidr" {
+variable "private_subnet_2_cidr" {
   description = "CIDR block for private subnet 2"
   type        = string
   default     = "10.0.4.0/24"
 }
 
-variable "ami_id" {
-  description = "AMI ID to use for EC2 instances (no default - please set for your region)"
+variable "web_ami" {
+  description = "AMI for web instances"
   type        = string
+  default     = "ami-0d811ba3ed794ec76"
+}
+
+variable "backend_ami" {
+  description = "AMI for backend instances"
+  type        = string
+  default     = "ami-00e760e8515f34f32"
 }
 
 variable "instance_type" {
-  description = "EC2 instance type"
+  description = "Instance type for EC2 instances"
   type        = string
   default     = "t3.micro"
 }
 
-variable "rds_instance_class" {
-  description = "RDS instance class"
+variable "vpc_id" {
+  description = "VPC ID for instances"
   type        = string
-  default     = "db.t3.micro"
+  default     = "vpc-0b703395bdeb8e06d"
 }
 
-variable "allocated_storage" {
-  description = "RDS allocated storage in GB (min 20)"
-  type        = number
-  default     = 20
-
-  validation {
-    condition     = var.allocated_storage >= 20
-    error_message = "allocated_storage must be at least 20 GB"
-  }
-}
-
-variable "db_name" {
-  description = "Postgres database name"
+variable "key_name" {
+  description = "EC2 Key Pair name for instances"
   type        = string
-  default     = "miniprojectdb"
-}
-
-variable "db_master_username" {
-  description = "Master username for the Postgres DB"
-  type        = string
-  default     = "dbadmin"
-}
-
-variable "db_master_password" {
-  description = "Master password for the Postgres DB (sensitive)"
-  type        = string
-  sensitive   = true
-
-  validation {
-    condition     = length(var.db_master_password) >= 8
-    error_message = "db_master_password must be at least 8 characters"
-  }
+  default     = "October2025"
 }
