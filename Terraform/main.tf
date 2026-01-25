@@ -1,8 +1,8 @@
 terraform {
   backend "s3" {
-    bucket  = "olawale-s3-devops-bucket"
+    bucket  = "teachbleat-cicd-state-bucket"
     key     = "envs/dev/terraform.tfstate"
-    region  = "us-east-2"
+    region  = "eu-west-1"
     encrypt = true
   }
   required_version = ">= 1.6.0"
