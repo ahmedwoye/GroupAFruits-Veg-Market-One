@@ -1,13 +1,11 @@
 terraform {
-
-
-
   backend "s3" {
-    bucket  = "teachbleat-cicd-state-bucket"
+    bucket  = "olawale-s3-devops-bucket"
     key     = "envs/dev/terraform.tfstate"
-    region  = "eu-west-1"
+    region  = "us-east-2"
     encrypt = true
   }
+  required_version = ">= 1.6.0"
 
   required_providers {
     aws = {
@@ -21,117 +19,78 @@ provider "aws" {
   region = var.aws_region
 }
 
-#####################
-# DATA
-#####################
-data "aws_availability_zones" "available" {
-  state = "available"
+# --- 1. WEB INSTANCES (Public) ---
+resource "aws_instance" "web" {
+  count                       = 2
+  ami                         = var.web_ami
+  instance_type               = var.instance_type
+  subnet_id                   = count.index == 0 ? aws_subnet.public_subnet_1.id : aws_subnet.public_subnet_2.id
+  vpc_security_group_ids      = [aws_security_group.web_sg.id]
+  key_name                    = var.key_name
+  associate_public_ip_address = true
+
+  tags = { Name = "web-instance-${count.index + 1}" }
 }
 
-#####################
-# VPC
-#####################
-resource "aws_vpc" "this" {
-  cidr_block           = var.vpc_cidr
-  enable_dns_support   = true
-  enable_dns_hostnames = true
+# --- 2. BACKEND INSTANCES (Private) ---
+resource "aws_instance" "backend" {
+  count                  = 2
+  ami                    = var.backend_ami
+  instance_type          = var.instance_type
+  subnet_id              = count.index == 0 ? aws_subnet.private_subnet_1.id : aws_subnet.private_subnet_2.id
+  vpc_security_group_ids = [aws_security_group.backend_sg.id]
+  key_name               = var.key_name
+  associate_public_ip_address = false
 
-  tags = { Name = "MiniProject-VPC" }
+  tags = { Name = "backend-instance-${count.index + 1}" }
 }
 
-resource "aws_internet_gateway" "this" {
-  vpc_id = aws_vpc.this.id
+# --- 3. JENKINS TOOL SERVER (Public) ---
+resource "aws_instance" "project_tool_server" {
+  count                       = 1
+  ami                         = var.backend_ami
+  instance_type               = var.instance_type
+  subnet_id                   = aws_subnet.public_subnet_1.id
+  vpc_security_group_ids      = [aws_security_group.jenkins_sg.id]
+  key_name                    = var.key_name
+  associate_public_ip_address = true
+
+  tags = { Name = "project_tool_server" }
 }
 
-#####################
-# SUBNETS
-#####################
-resource "aws_subnet" "public_1" {
-  vpc_id                  = aws_vpc.this.id
-  cidr_block              = var.public_subnet1_cidr
-  availability_zone       = data.aws_availability_zones.available.names[0]
-  map_public_ip_on_launch = true
+# --- 4. DATABASE RESOURCES ---
+
+# NEW: DB Subnet Group (Fixes the "2 AZ requirement" error)
+resource "aws_db_subnet_group" "project_db_subnet_group" {
+  name       = "project-db-subnet-group"
+  subnet_ids = [aws_subnet.private_subnet_1.id, aws_subnet.private_subnet_2.id]
+
+  tags = { Name = "Project DB Subnet Group" }
 }
 
-resource "aws_subnet" "public_2" {
-  vpc_id                  = aws_vpc.this.id
-  cidr_block              = var.public_subnet2_cidr
-  availability_zone       = data.aws_availability_zones.available.names[1]
-  map_public_ip_on_launch = true
+# The Database Instance
+resource "aws_db_instance" "project_db" {
+  identifier           = "project-database"
+  engine               = "postgres"
+  instance_class       = "db.t4g.micro"
+  allocated_storage    = 20
+  username             = "postgres"
+  password             = "olasumbo" 
+  
+  db_subnet_group_name = aws_db_subnet_group.project_db_subnet_group.name
+  vpc_security_group_ids = [aws_security_group.db_sg.id]
+  
+  skip_final_snapshot  = true
+  publicly_accessible  = false
 }
 
-resource "aws_subnet" "private_1" {
-  vpc_id            = aws_vpc.this.id
-  cidr_block        = var.private_subnet1_cidr
-  availability_zone = data.aws_availability_zones.available.names[0]
-}
+# --- 5. SECURITY GROUPS ---
 
-resource "aws_subnet" "private_2" {
-  vpc_id            = aws_vpc.this.id
-  cidr_block        = var.private_subnet2_cidr
-  availability_zone = data.aws_availability_zones.available.names[1]
-}
-
-#####################
-# ROUTING
-#####################
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.this.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.this.id
-  }
-}
-
-resource "aws_route_table_association" "public_1" {
-  subnet_id      = aws_subnet.public_1.id
-  route_table_id = aws_route_table.public.id
-}
-
-resource "aws_route_table_association" "public_2" {
-  subnet_id      = aws_subnet.public_2.id
-  route_table_id = aws_route_table.public.id
-}
-
-# NAT
-resource "aws_eip" "nat" {
-  domain = "vpc"
-}
-
-resource "aws_nat_gateway" "this" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public_1.id
-  depends_on    = [aws_internet_gateway.this]
-}
-
-resource "aws_route_table" "private" {
-  vpc_id = aws_vpc.this.id
-
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.this.id
-  }
-}
-
-resource "aws_route_table_association" "private_1" {
-  subnet_id      = aws_subnet.private_1.id
-  route_table_id = aws_route_table.private.id
-}
-
-resource "aws_route_table_association" "private_2" {
-  subnet_id      = aws_subnet.private_2.id
-  route_table_id = aws_route_table.private.id
-}
-
-#####################
-# SECURITY GROUPS
-#####################
-resource "aws_security_group" "public_web" {
-  vpc_id = aws_vpc.this.id
+resource "aws_security_group" "web_sg" {
+  name   = "web-sg"
+  vpc_id = aws_vpc.project_network.id
 
   ingress {
-    description = "SSH"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -145,10 +104,28 @@ resource "aws_security_group" "public_web" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "jenkins_sg" {
+  name   = "jenkins-sg"
+  vpc_id = aws_vpc.project_network.id
+
   ingress {
-    description = "HTTP"
-    from_port   = 443
-    to_port     = 443
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -161,18 +138,25 @@ resource "aws_security_group" "public_web" {
   }
 }
 
-resource "aws_security_group" "private_app" {
-  vpc_id = aws_vpc.this.id
+resource "aws_security_group" "backend_sg" {
+  name   = "backend-sg"
+  vpc_id = aws_vpc.project_network.id
 
   ingress {
-    from_port   = 8000
-    to_port     = 8000
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.vpc_cidr]
   }
 
+  ingress {
+    from_port       = 8000
+    to_port         = 8000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.web_sg.id]
+  }
+
   egress {
-    description = "HTTP"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -180,18 +164,16 @@ resource "aws_security_group" "private_app" {
   }
 }
 
-
-resource "aws_security_group" "rds" {
-  vpc_id = aws_vpc.this.id
+resource "aws_security_group" "db_sg" {
+  name        = "db-sg"
+  description = "Allow inbound traffic from backend only"
+  vpc_id      = aws_vpc.project_network.id
 
   ingress {
-    from_port = 5432
-    to_port   = 5432
-    protocol  = "tcp"
-    cidr_blocks = [
-      var.private_subnet1_cidr,
-      var.private_subnet2_cidr
-    ]
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.backend_sg.id] # Handshake
   }
 
   egress {
@@ -202,88 +184,7 @@ resource "aws_security_group" "rds" {
   }
 }
 
-
-#####################
-# EC2 INSTANCES
-#####################
-resource "aws_instance" "web_1" {
-  ami                    = var.ami_id
-  instance_type          = var.instance_type
-  subnet_id              = aws_subnet.public_1.id
-  vpc_security_group_ids = [aws_security_group.public_web.id]
-  key_name               = var.key_pair_name
-
-  tags = {
-    Name = "web_Server_VM1"
-  }
-
-}
-
-resource "aws_instance" "web_2" {
-  ami                    = var.ami_id
-  instance_type          = var.instance_type
-  subnet_id              = aws_subnet.public_2.id
-  vpc_security_group_ids = [aws_security_group.public_web.id]
-  key_name               = var.key_pair_name
-
-  tags = {
-    Name = "web_Server_VM2"
-  }
-
-}
-
-resource "aws_instance" "app_1" {
-  ami                    = var.ami_id
-  instance_type          = var.instance_type
-  subnet_id              = aws_subnet.private_1.id
-  vpc_security_group_ids = [aws_security_group.private_app.id]
-  key_name               = var.key_pair_name
-
-  tags = {
-    Name = "Backend_Sever_VM1"
-  }
-
-}
-
-resource "aws_instance" "app_2" {
-  ami                    = var.ami_id
-  instance_type          = var.instance_type
-  subnet_id              = aws_subnet.private_2.id
-  vpc_security_group_ids = [aws_security_group.private_app.id]
-  key_name               = var.key_pair_name
-
-  tags = {
-    Name = "Backend_Sever_VM2"
-  }
-}
-
-variable "key_pair_name" {
-  description = "Name of the existing AWS EC2 key pair to use for SSH access"
-  type        = string
-}
-
-#####################
-# RDS
-#####################
-resource "aws_db_subnet_group" "this" {
-  subnet_ids = [
-    aws_subnet.private_1.id,
-    aws_subnet.private_2.id
-  ]
-}
-
-resource "aws_db_instance" "postgres" {
-  identifier             = "miniproject-postgres"
-  engine                 = "postgres"
-  engine_version         = "17"
-  instance_class         = var.rds_instance_class
-  allocated_storage      = var.allocated_storage
-  db_name                = var.db_name
-  username               = var.db_master_username
-  password               = var.db_master_password
-  db_subnet_group_name   = aws_db_subnet_group.this.name
-  vpc_security_group_ids = [aws_security_group.rds.id]
-  multi_az               = false
-  publicly_accessible    = true
-  skip_final_snapshot    = true
+# --- 6. OUTPUTS ---
+output "rds_endpoint" {
+  value = aws_db_instance.project_db.endpoint
 }
