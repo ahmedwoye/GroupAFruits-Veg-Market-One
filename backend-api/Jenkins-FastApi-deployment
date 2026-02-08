@@ -1,7 +1,5 @@
 pipeline {
-    agent  {
-         
-    }
+    agent any
 
     environment {
         REMOTE_USER = "ec2-user"
@@ -11,7 +9,6 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout') {
             steps {
                 checkout scm
@@ -21,9 +18,13 @@ pipeline {
         stage('Prepare Dependencies') {
             steps {
                 sh """
-                    pip install --upgrade pip
+                    # Make sure python3 and pip3 exist on Jenkins host
+                    python3 --version || sudo yum install python3 -y
+                    python3 -m ensurepip --upgrade || true
+                    python3 -m pip install --upgrade pip
+
                     mkdir -p dependencies
-                    pip download -r backend-api/requirements.txt -d dependencies
+                    python3 -m pip download -r backend-api/requirements.txt -d dependencies
                 """
             }
         }
@@ -49,3 +50,4 @@ pipeline {
         }
     }
 }
+
