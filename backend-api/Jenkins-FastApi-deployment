@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        REMOTE_USER = "root"
-        REMOTE_HOST = "10.0.3.78"
+        REMOTE_USER = "ec2-user"
+        REMOTE_HOST = "10.0.1.133"
         REMOTE_PATH = "~/GroupAFruits-Veg-Market-One"
         SSH_CRED = "AWS_SSH_KEY"
     }
