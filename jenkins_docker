@@ -1,0 +1,19 @@
+pipeline {
+    agent {
+        docker {
+            image 'python:3.11'
+        }
+    }
+    stages {
+        stage('Prepare & Download') {
+            steps {
+                sh """
+                    mkdir -p dependencies
+                    pip install --upgrade pip
+                    pip download -r backend-api/requirements.txt -d ./dependencies
+                """
+            }
+        }
+        ...
+    }
+}
