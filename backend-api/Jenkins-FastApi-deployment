@@ -31,7 +31,8 @@ pipeline {
 
         stage('Deploy to Private Backend') {
             steps {
-                sshagent([env.SSH_CRED]) {
+                sshagent(credentials: ["AWS_SSH_KEY"]) {
+                //sshagent([env.SSH_CRED]) {
                     sh """
                         ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} 'mkdir -p ${REMOTE_PATH}'
                         scp -o StrictHostKeyChecking=no -r ./* ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/
