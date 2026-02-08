@@ -1,4 +1,4 @@
-pipeline {
+ pipeline {
     agent any
 
     environment {
@@ -18,7 +18,7 @@ pipeline {
         stage('Prepare Dependencies') {
             steps {
                 sh """
-                    # Make sure python3 and pip3 exist on Jenkins host
+                    # Ensure python3 and pip3 exist on Jenkins host
                     python3 --version || sudo yum install python3 -y
                     python3 -m ensurepip --upgrade || true
                     python3 -m pip install --upgrade pip
@@ -32,18 +32,17 @@ pipeline {
         stage('Deploy to Private Backend') {
             steps {
                 sshagent(credentials: ["AWS_SSH_KEY"]) {
-                //sshagent([env.SSH_CRED]) {
-                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
-                    cd ${REMOTE_PATH}/backend-api
-                    python3 -m venv venv
-                    source venv/bin/activate
-                    pip install --no-index --find-links=../dependencies -r requirements.txt
-                    sudo systemctl daemon-reload
-                    sudo systemctl restart fruit.service
-                    sudo systemctl status fruit.service '
+                    sh """ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} \\
+                    "cd ${REMOTE_PATH}/backend-api && \\
+                     python3 -m venv venv && \\
+                     source venv/bin/activate && \\
+                     pip install --no-index --find-links=../dependencies -r requirements.txt && \\
+                     sudo systemctl daemon-reload && \\
+                     sudo systemctl restart fruit.service && \\
+                     sudo systemctl status fruit.service"
+                    """
                 }
             }
         }
     }
 }
-
