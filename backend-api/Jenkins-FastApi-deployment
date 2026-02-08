@@ -26,7 +26,7 @@ pipeline {
                         ssh -o StrictHostKeyChecking=no ec2-user@10.0.3.78 'mkdir -p ~/GroupAFruits-Veg-Market-One'
                         
                         # 2. Pushing code and dependencies from Jenkins to Backend
-                        scp -o StrictHostKeyChecking=no -r ./* ec2-user@10.0.3.28:~/GroupAFruits-Veg-Market-One/
+                        scp -o StrictHostKeyChecking=no -r ./* ec2-user@10.0.3.78:~/GroupAFruits-Veg-Market-One/
                         
                         # 3. Running installation and start app
                         ssh -o StrictHostKeyChecking=no ec2-user@10.0.3.78 '
