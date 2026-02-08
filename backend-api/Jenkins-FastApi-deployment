@@ -23,13 +23,13 @@ pipeline {
                 sshagent(['AWS_SSH_KEY']) {
                     sh """
                         # 1. Making sure folder exists on the remote private server
-                        ssh -o StrictHostKeyChecking=no ec2-user@10.0.3.28 'mkdir -p ~/GroupAFruits-Veg-Market-One'
+                        ssh -o StrictHostKeyChecking=no ec2-user@10.0.3.78 'mkdir -p ~/GroupAFruits-Veg-Market-One'
                         
                         # 2. Pushing code and dependencies from Jenkins to Backend
                         scp -o StrictHostKeyChecking=no -r ./* ec2-user@10.0.3.28:~/GroupAFruits-Veg-Market-One/
                         
                         # 3. Running installation and start app
-                        ssh -o StrictHostKeyChecking=no ec2-user@10.0.3.28 '
+                        ssh -o StrictHostKeyChecking=no ec2-user@10.0.3.78 '
                             # Moving into the folder where main.py lives
                             cd ~/GroupAFruits-Veg-Market-One/backend-api
                             
