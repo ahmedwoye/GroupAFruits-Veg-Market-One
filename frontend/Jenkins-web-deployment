@@ -25,7 +25,7 @@ pipeline {
                     sh """
                         ssh -o StrictHostKeyChecking=no ec2-user@54.246.137.197 '
                             # 1. Remove existing directory to prevent "already exists" error
-                            sudo rm -rf ~/fruits-veg_market &&
+                            sudo rm -rf ~/GroupAFruits-Veg-Market-One &&
                             
                             # 2. Clone the specific branch
                             git clone https://github.com/ahmedwoye/GroupAFruits-Veg-Market-One.git
