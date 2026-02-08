@@ -37,7 +37,8 @@ pipeline {
                             sudo yum install python3-pip -y
                             
                             # Installing packages using the dependencies folder in the parent directory
-                            python3 -m pip download -r backend-api/requirements.txt -d ./dependencies
+                            pip3 install --no-index --find-links=../dependencies -r requirements.txt
+
                             
                             # Killing any running uvicorn process
                             pkill uvicorn || true
