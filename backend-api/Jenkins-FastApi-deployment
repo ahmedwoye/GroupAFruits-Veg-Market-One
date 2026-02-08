@@ -1,9 +1,6 @@
 pipeline {
-    agent {
-        docker {
-            image 'python:3.11-slim'
-            args '-u root:root' // Run as root so we can install packages if needed
-        }
+    agent any {
+         
     }
 
     environment {
