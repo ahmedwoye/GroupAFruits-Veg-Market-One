@@ -1,4 +1,4 @@
- pipeline {
+pipeline {
     agent any
 
     environment {
@@ -23,6 +23,7 @@
                     python3 -m ensurepip --upgrade || true
                     python3 -m pip install --upgrade pip
 
+                    # Download dependencies offline for deployment
                     mkdir -p dependencies
                     python3 -m pip download -r backend-api/requirements.txt -d dependencies
                 """
@@ -31,18 +32,31 @@
 
         stage('Deploy to Private Backend') {
             steps {
-                sshagent(credentials: ["AWS_SSH_KEY"]) {
-                    sh """ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} \\
-                    "cd ${REMOTE_PATH}/backend-api && \\
-                     python3 -m venv venv && \\
-                     source venv/bin/activate && \\
-                     pip install --no-index --find-links=../dependencies -r requirements.txt && \\
-                     sudo systemctl daemon-reload && \\
-                     sudo systemctl restart fruit.service && \\
-                     sudo systemctl status fruit.service"
+                sshagent(credentials: ["${SSH_CRED}"]) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} \\
+                        "cd ${REMOTE_PATH}/backend-api && \\
+                         # Create virtual environment if it does not exist
+                         if [ ! -d venv ]; then python3 -m venv venv; fi && \\
+                         source venv/bin/activate && \\
+                         pip install --no-index --find-links=../dependencies -r requirements.txt && \\
+                         # Reload and restart systemd service
+                         sudo systemctl daemon-reload && \\
+                         sudo systemctl restart fruit.service && \\
+                         sudo systemctl status fruit.service"
                     """
                 }
             }
         }
     }
+
+    post {
+        success {
+            echo "Deployment completed successfully!"
+        }
+        failure {
+            echo "Deployment failed! Check systemd service logs for errors."
+        }
+    }
 }
+
