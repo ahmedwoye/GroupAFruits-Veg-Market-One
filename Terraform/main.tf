@@ -60,12 +60,19 @@ resource "aws_instance" "project_tool_server" {
 
 # --- 4. DATABASE RESOURCES ---
 
-# NEW: DB Subnet Group (Fixes the "2 AZ requirement" error)
+
+
 resource "aws_db_subnet_group" "project_db_subnet_group" {
   name       = "project-db-subnet-group"
-  subnet_ids = [aws_subnet.private_subnet_1.id, aws_subnet.private_subnet_2.id]
-
+  subnet_ids = [
+    aws_subnet.private_subnet_1.id,
+    aws_subnet.private_subnet_2.id
+  ]
   tags = { Name = "Project DB Subnet Group" }
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # The Database Instance
