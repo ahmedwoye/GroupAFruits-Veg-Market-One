@@ -2,10 +2,12 @@ pipeline {
     agent any
 
     environment {
-        BASTION_PUBLIC_IP = '54.246.137.197'      // Bastion public IP
-        PRIVATE_EC2_IP   = '10.0.4.152'          // Private EC2 IP
+        # Bastion / public EC2 (Web server) - used as jump host
+        BASTION_PUBLIC_IP = '54.246.137.197'
+        # Private backend EC2
+        PRIVATE_EC2_IP   = '10.0.3.10'  // Replace with your actual backend EC2 private IP
         DEPLOY_DIR       = '~/GroupAFruits-Veg-Market-One'
-        SSH_CRED         = 'AWS_SSH_KEY'         // Jenkins stored private key credential
+        SSH_CRED         = 'AWS_SSH_KEY' // Jenkins stored private key credential
     }
 
     stages {
@@ -19,34 +21,49 @@ pipeline {
         stage('Prepare Dependencies') {
             steps {
                 sh '''
-                    mkdir -p dependencies
-                    echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > backend-api/requirements.txt
-                    docker run --rm -v $(pwd):/app -w /app python:3.9 bash -c '
-                        python -m pip install --upgrade pip
-                        pip download -r backend-api/requirements.txt -d dependencies
-                    '
+                mkdir -p dependencies
+                echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > backend-api/requirements.txt
+                docker run --rm -v $(pwd):/app -w /app python:3.9 bash -c '
+                    python -m pip install --upgrade pip
+                    pip download -r backend-api/requirements.txt -d dependencies
+                '
                 '''
             }
         }
 
-        stage('Deploy to Private EC2 via Bastion') {
+        stage('Deploy Backend') {
             steps {
                 sshagent([env.SSH_CRED]) {
-                    sh """
-                        # Rsync directly to private EC2 using Bastion as jump host
-                        rsync -avz --exclude '.git' -e "ssh -o StrictHostKeyChecking=no -J ec2-user@${BASTION_PUBLIC_IP}" ./ ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
+                    script {
 
-                        # Install dependencies & restart FastAPI
+                        // Step 1: Copy code directly to private EC2 via Bastion jump host
+                        sh """
+                        rsync -avz --exclude '.git' -e 'ssh -o StrictHostKeyChecking=no -J ec2-user@${BASTION_PUBLIC_IP}' ./ ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
+                        """
+
+                        // Step 2: SSH into private EC2 via jump host to install dependencies & start FastAPI
+                        sh """
                         ssh -o StrictHostKeyChecking=no -J ec2-user@${BASTION_PUBLIC_IP} ec2-user@${PRIVATE_EC2_IP} '
                             cd ${DEPLOY_DIR}/backend-api
+                            
+                            # Create Python virtual environment
                             python3 -m venv venv
                             source venv/bin/activate
+
+                            # Upgrade pip
                             pip install --upgrade pip
-                            pip install --no-index --find-links=../dependencies -r requirements.txt
+
+                            # Install dependencies (can now use NAT to access PyPI)
+                            pip install --no-cache-dir -r requirements.txt
+
+                            # Kill previous FastAPI process if running
                             pkill -f "uvicorn main:app" || true
+
+                            # Start FastAPI in background
                             nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
                         '
-                    """
+                        """
+                    }
                 }
             }
         }
