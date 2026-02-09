@@ -2,7 +2,12 @@ pipeline {
     agent any
 
     environment {
-        DEPENDENCY_DIR = "dependencies"
+        // Replace with your Bastion IP
+        BASTION_IP = '34.245.161.29'
+        // Replace with your private EC2 IP
+        PRIVATE_EC2_IP = '10.0.1.133'
+        DEPLOY_DIR = '~/GroupAFruits-Veg-Market-One'
+        SSH_CRED = 'AWS_SSH_KEY' // Jenkins private key credential ID
     }
 
     stages {
@@ -16,19 +21,15 @@ pipeline {
         stage('Prepare & Download Dependencies (Docker)') {
             steps {
                 script {
-                    // Make sure dependencies folder exists
-                    sh "mkdir -p ${DEPENDENCY_DIR}"
-
+                    // Create dependencies folder
+                    sh 'mkdir -p dependencies'
                     // Create requirements.txt if missing
-                    sh '''
-                        echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > backend-api/requirements.txt
-                    '''
-
-                    // Use Docker to download packages offline
+                    sh 'echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > backend-api/requirements.txt'
+                    // Download Python packages in Docker for offline install
                     sh """
-                        docker run --rm -v \$(pwd):/app -w /app python:3.9 bash -c '
+                        docker run --rm -v ${pwd()}:/app -w /app python:3.9 bash -c '
                             python -m pip install --upgrade pip
-                            pip download -r backend-api/requirements.txt -d ${DEPENDENCY_DIR}
+                            pip download -r backend-api/requirements.txt -d dependencies
                         '
                     """
                 }
@@ -37,31 +38,38 @@ pipeline {
 
         stage('Deploy to Private Backend (via Bastion)') {
             steps {
-                sshagent(['AWS_SSH_KEY']) {
+                sshagent([env.SSH_CRED]) {
                     script {
+                        // Step 1: Create remote folder
                         sh """
-                            # Create folder on private EC2 via Bastion
-                            ssh -o StrictHostKeyChecking=no -J ec2-user@34.245.161.29 ec2-user@10.0.1.133 'mkdir -p ~/GroupAFruits-Veg-Market-One'
+                        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -J ec2-user@${BASTION_IP} ec2-user@${PRIVATE_EC2_IP} \\
+                            'mkdir -p ${DEPLOY_DIR}'
+                        """
 
-                            # Copy code + dependencies to private EC2 via Bastion
-                            scp -o StrictHostKeyChecking=no -J ec2-user@34.245.161.29 -r ./* ec2-user@10.0.1.133:~/GroupAFruits-Veg-Market-One/
+                        // Step 2: Copy code and dependencies
+                        sh """
+                        scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -J ec2-user@${BASTION_IP} -r ./* ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
+                        """
 
-                            # Install packages and start FastAPI
-                            ssh -o StrictHostKeyChecking=no -J ec2-user@34.245.161.29 ec2-user@10.0.1.133 '
-                                cd ~/GroupAFruits-Veg-Market-One/backend-api
-                                
-                                # Install pip if missing
-                                sudo yum install python3-pip -y
+                        // Step 3: Install dependencies & start service
+                        sh """
+                        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -J ec2-user@${BASTION_IP} ec2-user@${PRIVATE_EC2_IP} '
+                            cd ${DEPLOY_DIR}/backend-api
 
-                                # Install dependencies offline
-                                pip3 install --no-index --find-links=../${DEPENDENCY_DIR} -r requirements.txt
+                            # Install pip if missing
+                            if ! command -v pip3 &>/dev/null; then
+                                sudo yum install -y python3-pip
+                            fi
 
-                                # Kill any running uvicorn
-                                pkill uvicorn || true
+                            # Install dependencies from local folder
+                            pip3 install --no-index --find-links=../dependencies -r requirements.txt
 
-                                # Start FastAPI
-                                nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
-                            '
+                            # Kill any existing uvicorn processes
+                            pkill uvicorn || true
+
+                            # Start Uvicorn in background and log output
+                            nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
+                        '
                         """
                     }
                 }
@@ -71,10 +79,10 @@ pipeline {
 
     post {
         success {
-            echo "Deployment completed successfully!"
+            echo 'Deployment completed successfully!'
         }
         failure {
-            echo "Deployment failed. Check Jenkins logs for details."
+            echo 'Deployment failed. Check logs for details.'
         }
     }
 }
