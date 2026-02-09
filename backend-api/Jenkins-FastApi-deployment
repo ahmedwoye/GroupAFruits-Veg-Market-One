@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        BASTION_IP = '34.245.161.29'
+        BASTION_IP = '54.246.137.197'
         PRIVATE_EC2_IP = '10.0.1.133'
         DEPLOY_DIR = '~/GroupAFruits-Veg-Market-One'
         SSH_CRED = 'AWS_SSH_KEY' // Jenkins private key stored as credential
