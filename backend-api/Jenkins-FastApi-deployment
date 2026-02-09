@@ -9,7 +9,8 @@ pipeline {
             // Private backend EC2
             PRIVATE_EC2_IP = '10.0.3.201'  // Replace with your actual backend EC2 private IP
         
-            DEPLOY_DIR = '~/GroupAFruits-Veg-Market-One'
+            DEPLOY_DIR = '/home/ec2-user/GroupAFruits-Veg-Market-One'
+'
         
             // Jenkins stored private key credential
             SSH_CRED = 'AWS_SSH_KEY'
