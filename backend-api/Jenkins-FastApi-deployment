@@ -34,19 +34,19 @@ pipeline {
                 sshagent([env.SSH_CRED]) {
                     script {
 
-                        // Step 1: Copy code to Bastion public IP
+                        // Step 1: Copy code to Bastion (excluding .git)
                         sh """
-                        scp -o StrictHostKeyChecking=no -r ./ ec2-user@${BASTION_PUBLIC_IP}:${DEPLOY_DIR}/
+                        rsync -avz --exclude '.git' ./ ec2-user@${BASTION_PUBLIC_IP}:${DEPLOY_DIR}/
                         """
 
-                        // Step 2: From Bastion, push files to private EC2
+                        // Step 2: From Bastion, push files to private EC2 (excluding .git)
                         sh """
                         ssh -o StrictHostKeyChecking=no ec2-user@${BASTION_PUBLIC_IP} '
-                            scp -o StrictHostKeyChecking=no -r ${DEPLOY_DIR}/* ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
+                            rsync -avz --exclude ".git" ${DEPLOY_DIR}/ ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
                         '
                         """
 
-                        // Step 3: Install dependencies & start service on private EC2
+                        // Step 3: Install dependencies & start FastAPI on private EC2
                         sh """
                         ssh -o StrictHostKeyChecking=no ec2-user@${BASTION_PUBLIC_IP} '
                             ssh -o StrictHostKeyChecking=no ec2-user@${PRIVATE_EC2_IP} "
