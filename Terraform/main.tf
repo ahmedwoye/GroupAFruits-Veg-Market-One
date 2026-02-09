@@ -84,8 +84,13 @@ resource "aws_db_instance" "project_db" {
   publicly_accessible  = false
 }
 
-# --- 5. SECURITY GROUPS ---
 
+
+
+# -------------------------------
+#  Security Groups
+# -------------------------------
+# Public Web SG
 resource "aws_security_group" "web_sg" {
   name   = "web-sg"
   vpc_id = aws_vpc.project_network.id
@@ -112,6 +117,7 @@ resource "aws_security_group" "web_sg" {
   }
 }
 
+# Jenkins SG (public)
 resource "aws_security_group" "jenkins_sg" {
   name   = "jenkins-sg"
   vpc_id = aws_vpc.project_network.id
@@ -138,22 +144,23 @@ resource "aws_security_group" "jenkins_sg" {
   }
 }
 
+# Backend SG (private)
 resource "aws_security_group" "backend_sg" {
   name   = "backend-sg"
   vpc_id = aws_vpc.project_network.id
 
   ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.jenkins_sg.id]  # Jenkins access
   }
 
   ingress {
     from_port       = 8000
     to_port         = 8000
     protocol        = "tcp"
-    security_groups = [aws_security_group.web_sg.id]
+    security_groups = [aws_security_group.web_sg.id]      # Web app access
   }
 
   egress {
@@ -164,16 +171,17 @@ resource "aws_security_group" "backend_sg" {
   }
 }
 
+# Database SG (private)
 resource "aws_security_group" "db_sg" {
   name        = "db-sg"
-  description = "Allow inbound traffic from backend only"
+  description = "Allow backend access"
   vpc_id      = aws_vpc.project_network.id
 
   ingress {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [aws_security_group.backend_sg.id] # Handshake
+    security_groups = [aws_security_group.backend_sg.id]
   }
 
   egress {
@@ -182,9 +190,4 @@ resource "aws_security_group" "db_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-}
-
-# --- 6. OUTPUTS ---
-output "rds_endpoint" {
-  value = aws_db_instance.project_db.endpoint
 }
