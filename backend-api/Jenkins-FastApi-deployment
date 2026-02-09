@@ -2,14 +2,13 @@ pipeline {
     agent any
 
     environment {
-        BASTION_IP = '34.245.161.29'
-        PRIVATE_EC2_IP = '10.0.1.133'
+        BASTION_IP = '34.245.161.29'        // Public Bastion IP
+        PRIVATE_EC2_IP = '10.0.1.133'      // Private EC2 IP
         DEPLOY_DIR = '~/GroupAFruits-Veg-Market-One'
-        SSH_CRED = 'AWS_SSH_KEY' // Jenkins private key credential ID
+        SSH_CRED = 'AWS_SSH_KEY'            // Jenkins private key credential ID
     }
 
     stages {
-
         stage('Checkout Code') {
             steps {
                 checkout scm
@@ -21,8 +20,9 @@ pipeline {
                 script {
                     sh 'mkdir -p dependencies'
                     sh 'echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > backend-api/requirements.txt'
+
                     sh """
-                        docker run --rm -v ${pwd()}:/app -w /app python:3.9 bash -c '
+                        docker run --rm -v \$(pwd):/app -w /app python:3.9 bash -c '
                             python -m pip install --upgrade pip
                             pip download -r backend-api/requirements.txt -d dependencies
                         '
@@ -31,52 +31,55 @@ pipeline {
             }
         }
 
-        stage('Deploy to Private Backend (via Bastion)') {
+        stage('Deploy via Bastion (SCP/SSH)') {
             steps {
                 sshagent([env.SSH_CRED]) {
                     script {
-                        // Step 1: Write a temporary SSH config for bastion
+                        // Save Jenkins private key to file
+                        sh 'echo "$SSH_KEY" > private_key.pem && chmod 600 private_key.pem'
+
+                        // Create SSH config for bastion and target EC2
                         writeFile file: 'ssh_config', text: """
 Host bastion
     HostName ${BASTION_IP}
     User ec2-user
+    IdentityFile private_key.pem
     StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null
-    IdentityFile ${env.SSH_AUTH_SOCK}
+    UserKnownHostsFile=/dev/null
 
 Host target
     HostName ${PRIVATE_EC2_IP}
     User ec2-user
+    IdentityFile private_key.pem
     ProxyJump bastion
     StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null
-    IdentityFile ${env.SSH_AUTH_SOCK}
+    UserKnownHostsFile=/dev/null
 """
 
-                        // Step 2: Create remote folder
+                        // Create deployment folder on private EC2
                         sh 'ssh -F ssh_config target "mkdir -p ${DEPLOY_DIR}"'
 
-                        // Step 3: Copy code and dependencies
-                        sh 'scp -F ssh_config -r ./* target:${DEPLOY_DIR}/'
+                        // Copy entire workspace to private EC2 using rsync (safe & incremental)
+                        sh 'rsync -avz -e "ssh -F ssh_config" ./ target:${DEPLOY_DIR}/'
 
-                        // Step 4: Install packages & start FastAPI
+                        // SSH to private EC2 and install dependencies + start FastAPI
                         sh """
                         ssh -F ssh_config target '
                             set -e
                             cd ${DEPLOY_DIR}/backend-api
 
-                            # Ensure pip3 exists
+                            # Install pip if missing
                             if ! command -v pip3 >/dev/null; then
                                 sudo yum install -y python3-pip
                             fi
 
-                            # Install dependencies from local wheels
+                            # Install Python dependencies from local folder
                             pip3 install --no-index --find-links=../dependencies -r requirements.txt
 
-                            # Kill any running uvicorn process
+                            # Stop any existing uvicorn processes
                             pkill uvicorn || true
 
-                            # Start FastAPI in background
+                            # Start FastAPI service in background
                             nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
                         '
                         """
@@ -87,11 +90,7 @@ Host target
     }
 
     post {
-        success {
-            echo 'Deployment completed successfully!'
-        }
-        failure {
-            echo 'Deployment failed. Check logs for details.'
-        }
+        success { echo 'Deployment completed successfully!' }
+        failure { echo 'Deployment failed. Check logs for details.' }
     }
 }
