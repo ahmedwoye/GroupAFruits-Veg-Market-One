@@ -1,28 +1,37 @@
 pipeline {
     agent any
 
+    environment {
+        DEPENDENCIES_DIR = "dependencies"
+        REQUIREMENTS_FILE = "backend-api/requirements.txt"
+        REMOTE_USER = "ec2-user"
+        REMOTE_HOST = "10.0.1.133"
+        REMOTE_APP_DIR = "~/GroupAFruits-Veg-Market-One"
+    }
+
     stages {
 
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
+                // Pull code from GitHub
                 checkout scm
             }
         }
 
-        stage('Prepare Dependencies (Docker Clean Build)') {
-            agent {
-                docker {
-                    image 'python:3.9'
-                    args '-u root:root'
-                }
-            }
+        stage('Prepare & Download Dependencies (Docker)') {
             steps {
                 sh '''
-                    python --version
-                    pip --version
+                    # Make sure dependencies folder exists
+                    mkdir -p ${DEPENDENCIES_DIR}
 
-                    mkdir -p dependencies
-                    pip download -r backend-api/requirements.txt -d dependencies
+                    # Create requirements file if missing
+                    echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > ${REQUIREMENTS_FILE}
+
+                    # Use Docker to download all Python packages (.whl) for offline transfer
+                    docker run --rm -v $PWD:/app -w /app python:3.9 bash -c "
+                        python -m pip install --upgrade pip
+                        pip download -r ${REQUIREMENTS_FILE} -d ${DEPENDENCIES_DIR}
+                    "
                 '''
             }
         }
@@ -31,33 +40,40 @@ pipeline {
             steps {
                 sshagent(['AWS_SSH_KEY']) {
                     sh '''
-                        ssh -o StrictHostKeyChecking=no ec2-user@10.0.1.133 \
-                        "mkdir -p ~/GroupAFruits-Veg-Market-One"
+                        # 1. Ensure folder exists on the private server
+                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p ${REMOTE_APP_DIR}"
 
-                        scp -o StrictHostKeyChecking=no -r * \
-                        ec2-user@10.0.1.133:~/GroupAFruits-Veg-Market-One/
+                        # 2. Copy code + dependencies to remote server
+                        scp -o StrictHostKeyChecking=no -r ./* ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_APP_DIR}/
 
-                        ssh -o StrictHostKeyChecking=no ec2-user@10.0.1.133 '
-                            cd ~/GroupAFruits-Veg-Market-One/backend-api
+                        # 3. Install dependencies & start FastAPI
+                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
+                            cd ${REMOTE_APP_DIR}/backend-api
 
-                            sudo yum install -y python3 python3-pip
+                            # Install pip if missing
+                            sudo yum install -y python3-pip || true
 
-                            python3 -m pip install --upgrade pip
+                            # Install dependencies from the offline folder
+                            pip3 install --no-index --find-links=../${DEPENDENCIES_DIR} -r requirements.txt
 
-                            python3 -m pip install --no-index \
-                              --find-links=../dependencies \
-                              -r requirements.txt
-
+                            # Kill any running uvicorn process
                             pkill uvicorn || true
 
-                            nohup python3 -m uvicorn main:app \
-                              --host 0.0.0.0 \
-                              --port 8000 \
-                              > ../fastapi.log 2>&1 &
+                            # Start FastAPI app in background and log output
+                            nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
                         '
                     '''
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            echo "Deployment completed successfully!"
+        }
+        failure {
+            echo "Deployment failed. Check Jenkins logs for details."
         }
     }
 }
