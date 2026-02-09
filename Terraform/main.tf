@@ -64,14 +64,11 @@ resource "aws_instance" "project_tool_server" {
 
 resource "aws_db_subnet_group" "project_db_subnet_group" {
   name       = "project-db-subnet-group"
-  subnet_ids = [
-    aws_subnet.private_subnet_1.id,
-    aws_subnet.private_subnet_2.id
-  ]
+  subnet_ids = [aws_subnet.private_subnet_1.id, aws_subnet.private_subnet_2.id]
+
   tags = { Name = "Project DB Subnet Group" }
-
-
 }
+
 
 # The Database Instance
 resource "aws_db_instance" "project_db" {
