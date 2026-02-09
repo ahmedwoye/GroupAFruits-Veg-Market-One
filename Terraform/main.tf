@@ -70,9 +70,7 @@ resource "aws_db_subnet_group" "project_db_subnet_group" {
   ]
   tags = { Name = "Project DB Subnet Group" }
 
-  lifecycle {
-    create_before_destroy = true
-  }
+
 }
 
 # The Database Instance
