@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         BASTION_PUBLIC_IP = '54.246.137.197'      // Bastion public IP
-        PRIVATE_EC2_IP   = '10.0.1.133'          // Private EC2 IP
+        PRIVATE_EC2_IP   = '10.0.4.152'          // Private EC2 IP
         DEPLOY_DIR       = '~/GroupAFruits-Veg-Market-One'
         SSH_CRED         = 'AWS_SSH_KEY'         // Jenkins stored private key credential
     }
