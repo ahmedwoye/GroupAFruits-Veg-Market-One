@@ -1,4 +1,6 @@
-# 1. VPC Configuration
+# -------------------------------
+#  VPC
+# -------------------------------
 resource "aws_vpc" "project_network" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -9,7 +11,9 @@ resource "aws_vpc" "project_network" {
   }
 }
 
-# 2. Internet Gateway (For Public Subnets)
+# -------------------------------
+#  Internet Gateway (Public Subnets)
+# -------------------------------
 resource "aws_internet_gateway" "project_igw" {
   vpc_id = aws_vpc.project_network.id
 
@@ -18,7 +22,9 @@ resource "aws_internet_gateway" "project_igw" {
   }
 }
 
-# 3. Public Subnets (For Web and Jenkins)
+# -------------------------------
+#  Public Subnets
+# -------------------------------
 resource "aws_subnet" "public_subnet_1" {
   vpc_id            = aws_vpc.project_network.id
   cidr_block        = var.public_subnet_1_cidr
@@ -41,7 +47,9 @@ resource "aws_subnet" "public_subnet_2" {
   }
 }
 
-# 4. Private Subnets (For Backend/Database)
+# -------------------------------
+#  Private Subnets
+# -------------------------------
 resource "aws_subnet" "private_subnet_1" {
   vpc_id            = aws_vpc.project_network.id
   cidr_block        = var.private_subnet_1_cidr
@@ -64,7 +72,9 @@ resource "aws_subnet" "private_subnet_2" {
   }
 }
 
-# 5. Public Route Table (Connected to Internet)
+# -------------------------------
+#  Public Route Table (for IGW)
+# -------------------------------
 resource "aws_route_table" "public_rt" {
   vpc_id = aws_vpc.project_network.id
 
@@ -88,13 +98,36 @@ resource "aws_route_table_association" "public_subnet_2_assoc" {
   route_table_id = aws_route_table.public_rt.id
 }
 
-# 6. Private Route Table
+# -------------------------------
+#  NAT Gateway for Private Subnets
+# -------------------------------
+resource "aws_eip" "nat_eip" {
+  vpc = true
+  tags = { Name = "nat-eip" }
+}
+
+resource "aws_nat_gateway" "nat_gw" {
+  allocation_id = aws_eip.nat_eip.id
+  subnet_id     = aws_subnet.public_subnet_1.id
+
+  tags = { Name = "nat-gw" }
+}
+
+# -------------------------------
+#  Private Route Table (for Private Subnets via NAT)
+# -------------------------------
 resource "aws_route_table" "private_rt" {
   vpc_id = aws_vpc.project_network.id
 
   tags = {
     Name = "private_rt"
   }
+}
+
+resource "aws_route" "private_nat_route" {
+  route_table_id         = aws_route_table.private_rt.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.nat_gw.id
 }
 
 resource "aws_route_table_association" "private_subnet_1_assoc" {
@@ -107,18 +140,14 @@ resource "aws_route_table_association" "private_subnet_2_assoc" {
   route_table_id = aws_route_table.private_rt.id
 }
 
-# 7. S3 GATEWAY ENDPOINT 
-# This allows private instances to download Linux updates directly from AWS internal network
+# -------------------------------
+# S3 Gateway Endpoint (Optional, for private instance access to S3)
+# -------------------------------
 resource "aws_vpc_endpoint" "s3_gateway" {
   vpc_id            = aws_vpc.project_network.id
   service_name      = "com.amazonaws.${var.aws_region}.s3"
   vpc_endpoint_type = "Gateway"
-
-  # Links the endpoint to your route tables so instances know how to use it
-  route_table_ids = [
-    aws_route_table.public_rt.id,
-    aws_route_table.private_rt.id
-  ]
+  route_table_ids   = [aws_route_table.public_rt.id, aws_route_table.private_rt.id]
 
   tags = {
     Name = "s3-endpoint-for-updates"
