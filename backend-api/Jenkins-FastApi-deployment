@@ -1,14 +1,19 @@
 pipeline {
     agent any
 
-    environment {
-        # Bastion / public EC2 (Web server) - used as jump host
-        BASTION_PUBLIC_IP = '3.252.82.226'
-        # Private backend EC2
-        PRIVATE_EC2_IP   = '10.0.3.201'  // Replace with your actual backend EC2 private IP
-        DEPLOY_DIR       = '~/GroupAFruits-Veg-Market-One'
-        SSH_CRED         = 'AWS_SSH_KEY' // Jenkins stored private key credential
-    }
+  
+        environment {
+            // Bastion / public EC2 (Web server) - used as jump host
+            BASTION_PUBLIC_IP = '3.252.82.226'
+        
+            // Private backend EC2
+            PRIVATE_EC2_IP = '10.0.3.201'  // Replace with your actual backend EC2 private IP
+        
+            DEPLOY_DIR = '~/GroupAFruits-Veg-Market-One'
+        
+            // Jenkins stored private key credential
+            SSH_CRED = 'AWS_SSH_KEY'
+        }
 
     stages {
 
