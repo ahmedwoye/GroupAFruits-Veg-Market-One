@@ -2,67 +2,68 @@ pipeline {
     agent any
 
     environment {
-        DEPENDENCIES_DIR = "dependencies"
-        REQUIREMENTS_FILE = "backend-api/requirements.txt"
-        REMOTE_USER = "ec2-user"
-        REMOTE_HOST = "10.0.1.133"
-        REMOTE_APP_DIR = "~/GroupAFruits-Veg-Market-One"
+        DEPENDENCY_DIR = "dependencies"
     }
 
     stages {
 
         stage('Checkout Code') {
             steps {
-                // Pull code from GitHub
                 checkout scm
             }
         }
 
         stage('Prepare & Download Dependencies (Docker)') {
             steps {
-                sh '''
-                    # Make sure dependencies folder exists
-                    mkdir -p ${DEPENDENCIES_DIR}
+                script {
+                    // Make sure dependencies folder exists
+                    sh "mkdir -p ${DEPENDENCY_DIR}"
 
-                    # Create requirements file if missing
-                    echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > ${REQUIREMENTS_FILE}
+                    // Create requirements.txt if missing
+                    sh '''
+                        echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > backend-api/requirements.txt
+                    '''
 
-                    # Use Docker to download all Python packages (.whl) for offline transfer
-                    docker run --rm -v $PWD:/app -w /app python:3.9 bash -c "
-                        python -m pip install --upgrade pip
-                        pip download -r ${REQUIREMENTS_FILE} -d ${DEPENDENCIES_DIR}
-                    "
-                '''
+                    // Use Docker to download packages offline
+                    sh """
+                        docker run --rm -v \$(pwd):/app -w /app python:3.9 bash -c '
+                            python -m pip install --upgrade pip
+                            pip download -r backend-api/requirements.txt -d ${DEPENDENCY_DIR}
+                        '
+                    """
+                }
             }
         }
 
-        stage('Deploy to Private Backend') {
+        stage('Deploy to Private Backend (via Bastion)') {
             steps {
                 sshagent(['AWS_SSH_KEY']) {
-                    sh '''
-                        # 1. Ensure folder exists on the private server
-                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} "mkdir -p ${REMOTE_APP_DIR}"
+                    script {
+                        sh """
+                            # Create folder on private EC2 via Bastion
+                            ssh -o StrictHostKeyChecking=no -J ec2-user@34.245.161.29 ec2-user@10.0.1.133 'mkdir -p ~/GroupAFruits-Veg-Market-One'
 
-                        # 2. Copy code + dependencies to remote server
-                        scp -o StrictHostKeyChecking=no -r ./* ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_APP_DIR}/
+                            # Copy code + dependencies to private EC2 via Bastion
+                            scp -o StrictHostKeyChecking=no -J ec2-user@34.245.161.29 -r ./* ec2-user@10.0.1.133:~/GroupAFruits-Veg-Market-One/
 
-                        # 3. Install dependencies & start FastAPI
-                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '
-                            cd ${REMOTE_APP_DIR}/backend-api
+                            # Install packages and start FastAPI
+                            ssh -o StrictHostKeyChecking=no -J ec2-user@34.245.161.29 ec2-user@10.0.1.133 '
+                                cd ~/GroupAFruits-Veg-Market-One/backend-api
+                                
+                                # Install pip if missing
+                                sudo yum install python3-pip -y
 
-                            # Install pip if missing
-                            sudo yum install -y python3-pip || true
+                                # Install dependencies offline
+                                pip3 install --no-index --find-links=../${DEPENDENCY_DIR} -r requirements.txt
 
-                            # Install dependencies from the offline folder
-                            pip3 install --no-index --find-links=../${DEPENDENCIES_DIR} -r requirements.txt
+                                # Kill any running uvicorn
+                                pkill uvicorn || true
 
-                            # Kill any running uvicorn process
-                            pkill uvicorn || true
-
-                            # Start FastAPI app in background and log output
-                            nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
-                        '
-                    '''
+                                # Start FastAPI
+                                nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
+                            '
+                        """
+                    }
                 }
             }
         }
