@@ -5,7 +5,7 @@ pipeline {
         BASTION_IP = '10.0.1.9'
         PRIVATE_EC2_IP = '10.0.1.133'
         DEPLOY_DIR = '~/GroupAFruits-Veg-Market-One'
-        SSH_CRED = 'AWS_SSH_KEY' // Jenkins private key stored as credential
+        SSH_CRED = 'AWS_SSH_KEY' // Jenkins private key for private EC2
     }
 
     stages {
@@ -26,32 +26,22 @@ pipeline {
             }
         }
 
-        stage('Deploy via Bastion') {
+        stage('Deploy to Private EC2 via Bastion') {
             steps {
                 sshagent([env.SSH_CRED]) {
                     script {
-                        // Save key for Jenkins shell
-                        sh 'echo "$SSH_KEY" > private_key.pem && chmod 600 private_key.pem'
-
-                        // Step 1: Copy all files to Bastion first
-                        sh 'scp -o StrictHostKeyChecking=no -i private_key.pem -r ./ ec2-user@${BASTION_IP}:${DEPLOY_DIR}/'
-
-                        // Step 2: From bastion, push to private EC2
+                        // Copy code + dependencies directly to private EC2 via Bastion (ProxyJump)
                         sh """
-                        ssh -i private_key.pem ec2-user@${BASTION_IP} '
-                            scp -o StrictHostKeyChecking=no -r ${DEPLOY_DIR}/* ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
-                        '
+                        scp -o StrictHostKeyChecking=no -o ProxyJump=ec2-user@${BASTION_IP} -r ./ ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
                         """
 
-                        // Step 3: Install dependencies & start service on private EC2
+                        // Run commands on private EC2 via Bastion
                         sh """
-                        ssh -i private_key.pem ec2-user@${BASTION_IP} '
-                            ssh -o StrictHostKeyChecking=no ec2-user@${PRIVATE_EC2_IP} "
-                                cd ${DEPLOY_DIR}/backend-api
-                                pip3 install --no-index --find-links=../dependencies -r requirements.txt
-                                pkill uvicorn || true
-                                nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
-                            "
+                        ssh -o StrictHostKeyChecking=no -o ProxyJump=ec2-user@${BASTION_IP} ec2-user@${PRIVATE_EC2_IP} '
+                            cd ${DEPLOY_DIR}/backend-api
+                            pip3 install --no-index --find-links=../dependencies -r requirements.txt
+                            pkill uvicorn || true
+                            nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
                         '
                         """
                     }
