@@ -1,62 +1,53 @@
 pipeline {
     agent any
-
-    environment {
-        REMOTE_USER = "ec2-user"
-        REMOTE_HOST = "10.0.1.133"
-        REMOTE_PATH = "~/GroupAFruits-Veg-Market-One"
-        SSH_CRED = "AWS_SSH_KEY"
-    }
-
     stages {
-        stage('Checkout') {
+        stage('Prepare & Download (on Jenkins)') {
             steps {
-                checkout scm
+                script {
+                    // Pull code from GitHub to Jenkins Workspace
+                    checkout scm 
+                    
+                    // Create requirements file if missing
+                    sh 'echo "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > requirements.txt'
+                    
+                    // Download installer files (.whl) to Jenkins for offline transfer
+                    sh "pip3 download -r backend-api/requirements.txt -d ./dependencies"
+                }
             }
-        }
-
-        stage('Prepare Dependencies') {
-            steps {
-                sh """
-                    # Ensure python3 and pip3 exist on Jenkins host
-                    python3 --version || sudo yum install python3 -y
-                    python3 -m ensurepip --upgrade || true
-                    python3 -m pip install --upgrade pip
-
-                    # Download dependencies offline for deployment
-                    mkdir -p dependencies
-                    python3 -m pip download -r backend-api/requirements.txt -d dependencies
-                """
-            }
-        }
+        } // End Prepare Stage
 
         stage('Deploy to Private Backend') {
             steps {
-                sshagent(credentials: ["${SSH_CRED}"]) {
+                // Ensure this matches the SSH key credential ID in Jenkins
+                sshagent(['AWS_SSH_KEY']) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} \\
-                        "cd ${REMOTE_PATH}/backend-api && \\
-                         # Create virtual environment if it does not exist
-                         if [ ! -d venv ]; then python3 -m venv venv; fi && \\
-                         source venv/bin/activate && \\
-                         pip install --no-index --find-links=../dependencies -r requirements.txt && \\
-                         # Reload and restart systemd service
-                         sudo systemctl daemon-reload && \\
-                         sudo systemctl restart fruit.service && \\
-                         sudo systemctl status fruit.service"
+                        # 1. Making sure folder exists on the remote private server
+                        ssh -o StrictHostKeyChecking=no ec2-user@10.0.1.33 'mkdir -p ~/GroupAFruits-Veg-Market-One'
+                        
+                        # 2. Pushing code and dependencies from Jenkins to Backend
+                        scp -o StrictHostKeyChecking=no -r ./* ec2-user@10.0.1.133:~/GroupAFruits-Veg-Market-One/
+                        
+                        # 3. Running installation and start app
+                        ssh -o StrictHostKeyChecking=no ec2-user@10.0.1.133 '
+                            # Moving into the folder where main.py lives
+                            cd ~/fruits-veg_market/backend-api
+                            
+                            # Installing Pip if not present
+                            sudo yum install python3-pip -y
+                            
+                            # Installing packages using the dependencies folder in the parent directory
+                            pip3 install --no-index --find-links=../dependencies -r requirements.txt
+                            
+                            # Killing any running uvicorn process
+                            pkill uvicorn || true
+                            
+                            # Starting Uvicorn and save logs to the parent directory for easy access
+                            nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
+                        '
                     """
                 }
             }
-        }
-    }
-
-    post {
-        success {
-            echo "Deployment completed successfully!"
-        }
-        failure {
-            echo "Deployment failed! Check systemd service logs for errors."
-        }
-    }
-}
+        } // End Deploy Stage
+    } // End Stages block
+} // End Pipeline block
 
