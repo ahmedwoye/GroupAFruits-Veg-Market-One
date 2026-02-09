@@ -19,45 +19,34 @@ pipeline {
         stage('Prepare Dependencies') {
             steps {
                 sh '''
-                mkdir -p dependencies
-                echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > backend-api/requirements.txt
-                docker run --rm -v $(pwd):/app -w /app python:3.9 bash -c '
-                    python -m pip install --upgrade pip
-                    pip download -r backend-api/requirements.txt -d dependencies
-                '
+                    mkdir -p dependencies
+                    echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > backend-api/requirements.txt
+                    docker run --rm -v $(pwd):/app -w /app python:3.9 bash -c '
+                        python -m pip install --upgrade pip
+                        pip download -r backend-api/requirements.txt -d dependencies
+                    '
                 '''
             }
         }
 
-        stage('Deploy via Bastion') {
+        stage('Deploy to Private EC2 via Bastion') {
             steps {
                 sshagent([env.SSH_CRED]) {
-                    script {
+                    sh """
+                        # Rsync directly to private EC2 using Bastion as jump host
+                        rsync -avz --exclude '.git' -e "ssh -o StrictHostKeyChecking=no -J ec2-user@${BASTION_PUBLIC_IP}" ./ ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
 
-                        // Step 1: Copy code to Bastion (excluding .git)
-                        sh """
-                        rsync -avz --exclude '.git' ./ ec2-user@${BASTION_PUBLIC_IP}:${DEPLOY_DIR}/
-                        """
-
-                        // Step 2: From Bastion, push files to private EC2 (excluding .git)
-                        sh """
-                        ssh -o StrictHostKeyChecking=no ec2-user@${BASTION_PUBLIC_IP} '
-                            rsync -avz --exclude ".git" ${DEPLOY_DIR}/ ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
+                        # Install dependencies & restart FastAPI
+                        ssh -o StrictHostKeyChecking=no -J ec2-user@${BASTION_PUBLIC_IP} ec2-user@${PRIVATE_EC2_IP} '
+                            cd ${DEPLOY_DIR}/backend-api
+                            python3 -m venv venv
+                            source venv/bin/activate
+                            pip install --upgrade pip
+                            pip install --no-index --find-links=../dependencies -r requirements.txt
+                            pkill -f "uvicorn main:app" || true
+                            nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
                         '
-                        """
-
-                        // Step 3: Install dependencies & start FastAPI on private EC2
-                        sh """
-                        ssh -o StrictHostKeyChecking=no ec2-user@${BASTION_PUBLIC_IP} '
-                            ssh -o StrictHostKeyChecking=no ec2-user@${PRIVATE_EC2_IP} "
-                                cd ${DEPLOY_DIR}/backend-api
-                                pip3 install --no-index --find-links=../dependencies -r requirements.txt
-                                pkill uvicorn || true
-                                nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
-                            "
-                        '
-                        """
-                    }
+                    """
                 }
             }
         }
