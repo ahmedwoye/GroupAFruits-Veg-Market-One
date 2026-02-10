@@ -3,10 +3,10 @@ pipeline {
 
     environment {
         // Bastion (Public EC2 - Jump Host)
-        BASTION_PUBLIC_IP = '54.246.137.197'
+        BASTION_PUBLIC_IP = '3.252.82.226'
 
         // Private Backend EC2
-        PRIVATE_EC2_IP = '10.0.3.10'
+        PRIVATE_EC2_IP = '10.0.3.201'
 
         // Deployment directory on private EC2
         DEPLOY_DIR = '/home/ec2-user/GroupAFruits-Veg-Market-One'
@@ -56,7 +56,24 @@ psycopg[binary]" > backend-api/requirements.txt
                             ./ ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
                     """
 
-                    // Step 2: Install dependencies and start FastAPI
+                    // Step 2: Install systemd service BEFORE backend deployment
+                    sh """
+                        ssh -o StrictHostKeyChecking=no \
+                            -J ec2-user@${BASTION_PUBLIC_IP} \
+                            ec2-user@${PRIVATE_EC2_IP} '
+
+                            echo "Installing systemd service..."
+
+                            sudo cp ${DEPLOY_DIR}/backend-api/fastapi.service \
+                                /etc/systemd/system/fruit.service
+
+                            sudo systemctl daemon-reload
+                            sudo systemctl enable fruit.service
+                            sudo systemctl restart fruit.service
+                        '
+                    """
+
+                    // Step 3: Install dependencies
                     sh """
                         ssh -o StrictHostKeyChecking=no \
                             -J ec2-user@${BASTION_PUBLIC_IP} \
@@ -64,18 +81,11 @@ psycopg[binary]" > backend-api/requirements.txt
 
                             cd ${DEPLOY_DIR}/backend-api
 
-                            python3 -m venv venv
+                            python3 -m venv venv || true
                             source venv/bin/activate
 
                             pip install --upgrade pip
                             pip install --no-cache-dir -r requirements.txt
-
-                            pkill -f "uvicorn main:app" || true
-
-                            nohup python3 -m uvicorn main:app \
-                                --host 0.0.0.0 \
-                                --port 8000 \
-                                > ../fastapi.log 2>&1 &
                         '
                     """
                 }
