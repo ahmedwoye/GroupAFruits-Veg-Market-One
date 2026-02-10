@@ -1,20 +1,19 @@
 pipeline {
     agent any
 
-  
-        environment {
-            // Bastion / public EC2 (Web server) - used as jump host
-            BASTION_PUBLIC_IP = '3.252.82.226'
-        
-            // Private backend EC2
-            PRIVATE_EC2_IP = '10.0.3.201'  // Replace with your actual backend EC2 private IP
-        
-            DEPLOY_DIR = '/home/ec2-user/GroupAFruits-Veg-Market-One'
+    environment {
+        // Bastion (Public EC2 - Jump Host)
+        BASTION_PUBLIC_IP = '54.246.137.197'
 
-        
-            // Jenkins stored private key credential
-            SSH_CRED = 'AWS_SSH_KEY'
-        }
+        // Private Backend EC2
+        PRIVATE_EC2_IP = '10.0.3.10'
+
+        // Deployment directory on private EC2
+        DEPLOY_DIR = '/home/ec2-user/GroupAFruits-Veg-Market-One'
+
+        // Jenkins SSH credential ID
+        SSH_CRED = 'AWS_SSH_KEY'
+    }
 
     stages {
 
@@ -27,12 +26,20 @@ pipeline {
         stage('Prepare Dependencies') {
             steps {
                 sh '''
-                mkdir -p dependencies
-                echo -e "fastapi\nuvicorn\nsqlalchemy\npsycopg[binary]" > backend-api/requirements.txt
-                docker run --rm -v $(pwd):/app -w /app python:3.9 bash -c '
-                    python -m pip install --upgrade pip
-                    pip download -r backend-api/requirements.txt -d dependencies
-                '
+                    mkdir -p dependencies
+
+                    echo -e "fastapi
+uvicorn
+sqlalchemy
+psycopg[binary]" > backend-api/requirements.txt
+
+                    docker run --rm \
+                        -v $(pwd):/app \
+                        -w /app \
+                        python:3.9 bash -c "
+                            python -m pip install --upgrade pip
+                            pip download -r backend-api/requirements.txt -d dependencies
+                        "
                 '''
             }
         }
@@ -40,36 +47,37 @@ pipeline {
         stage('Deploy Backend') {
             steps {
                 sshagent([env.SSH_CRED]) {
-                    script {
 
-                        // Step 1: Copy code directly to private EC2 via Bastion jump host
-                        sh """
-                        rsync -avz --exclude '.git' -e 'ssh -o StrictHostKeyChecking=no -J ec2-user@${BASTION_PUBLIC_IP}' ./ ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
-                        """
+                    // Step 1: Copy project to Private EC2 via Bastion
+                    sh """
+                        rsync -avz --delete \
+                            --exclude '.git' \
+                            -e "ssh -o StrictHostKeyChecking=no -J ec2-user@${BASTION_PUBLIC_IP}" \
+                            ./ ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
+                    """
 
-                        // Step 2: SSH into private EC2 via jump host to install dependencies & start FastAPI
-                        sh """
-                        ssh -o StrictHostKeyChecking=no -J ec2-user@${BASTION_PUBLIC_IP} ec2-user@${PRIVATE_EC2_IP} '
+                    // Step 2: Install dependencies and start FastAPI
+                    sh """
+                        ssh -o StrictHostKeyChecking=no \
+                            -J ec2-user@${BASTION_PUBLIC_IP} \
+                            ec2-user@${PRIVATE_EC2_IP} '
+
                             cd ${DEPLOY_DIR}/backend-api
-                            
-                            # Create Python virtual environment
+
                             python3 -m venv venv
                             source venv/bin/activate
 
-                            # Upgrade pip
                             pip install --upgrade pip
-
-                            # Install dependencies (can now use NAT to access PyPI)
                             pip install --no-cache-dir -r requirements.txt
 
-                            # Kill previous FastAPI process if running
                             pkill -f "uvicorn main:app" || true
 
-                            # Start FastAPI in background
-                            nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 > ../fastapi.log 2>&1 &
+                            nohup python3 -m uvicorn main:app \
+                                --host 0.0.0.0 \
+                                --port 8000 \
+                                > ../fastapi.log 2>&1 &
                         '
-                        """
-                    }
+                    """
                 }
             }
         }
