@@ -2,91 +2,125 @@ pipeline {
     agent any
 
     environment {
-        // Bastion (Public EC2 - Jump Host)
         BASTION_PUBLIC_IP = '3.252.82.226'
+        PRIVATE_EC2_IP    = '10.0.3.201'
+        APP_BASE_DIR      = '/home/ec2-user/apps'
+        SSH_CRED          = 'AWS_SSH_KEY'
+        APP_PORT          = '8000'
+    }
 
-        // Private Backend EC2
-        PRIVATE_EC2_IP = '10.0.3.201'
-
-        // Deployment directory on private EC2
-        DEPLOY_DIR = '/home/ec2-user/GroupAFruits-Veg-Market-One'
-
-        // Jenkins SSH credential ID
-        SSH_CRED = 'AWS_SSH_KEY'
+    options {
+        timestamps()
+        disableConcurrentBuilds()
     }
 
     stages {
 
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
                 checkout scm
             }
         }
 
-        stage('Prepare Dependencies') {
+        stage('Build Artifact') {
             steps {
                 sh '''
-                    mkdir -p dependencies
-
-                    echo -e "fastapi
-uvicorn
-sqlalchemy
-psycopg[binary]" > backend-api/requirements.txt
-
-                    docker run --rm \
-                        -v $(pwd):/app \
-                        -w /app \
-                        python:3.9 bash -c "
-                            python -m pip install --upgrade pip
-                            pip download -r backend-api/requirements.txt -d dependencies
-                        "
+                    mkdir -p artifact
+                    rsync -av --exclude '.git' ./ artifact/
                 '''
             }
         }
 
-        stage('Deploy Backend') {
+        stage('Deploy to Production') {
             steps {
                 sshagent([env.SSH_CRED]) {
+                    script {
 
-                    // Step 1: Copy project to Private EC2 via Bastion
-                    sh """
-                        rsync -avz --delete \
-                            --exclude '.git' \
-                            -e "ssh -o StrictHostKeyChecking=no -J ec2-user@${BASTION_PUBLIC_IP}" \
-                            ./ ec2-user@${PRIVATE_EC2_IP}:${DEPLOY_DIR}/
-                    """
+                        def release = sh(
+                            script: "date +%Y-%m-%d_%H-%M-%S",
+                            returnStdout: true
+                        ).trim()
 
-                    // Step 2: Install systemd service BEFORE backend deployment
-                    sh """
+                        sh """
                         ssh -o StrictHostKeyChecking=no \
-                            -J ec2-user@${BASTION_PUBLIC_IP} \
-                            ec2-user@${PRIVATE_EC2_IP} '
+                        -J ec2-user@${BASTION_PUBLIC_IP} \
+                        ec2-user@${PRIVATE_EC2_IP} '
 
-                            echo "Installing systemd service..."
+                            set -e
 
-                            sudo cp ${DEPLOY_DIR}/backend-api/fastapi.service \
-                                /etc/systemd/system/fruit.service
+                            RELEASE_DIR=${APP_BASE_DIR}/releases/${release}
+                            CURRENT_DIR=${APP_BASE_DIR}/current
 
-                            sudo systemctl daemon-reload
-                            sudo systemctl enable fruit.service
-                            sudo systemctl restart fruit.service
+                            echo "Creating release directory..."
+                            mkdir -p \$RELEASE_DIR
                         '
-                    """
+                        """
 
-                    // Step 3: Install dependencies
-                    sh """
+                        // Copy artifact
+                        sh """
+                        rsync -avz --delete \
+                            -e "ssh -o StrictHostKeyChecking=no -J ec2-user@${BASTION_PUBLIC_IP}" \
+                            artifact/ ec2-user@${PRIVATE_EC2_IP}:${APP_BASE_DIR}/releases/${release}/
+                        """
+
+                        // Remote setup & atomic switch
+                        sh """
                         ssh -o StrictHostKeyChecking=no \
-                            -J ec2-user@${BASTION_PUBLIC_IP} \
-                            ec2-user@${PRIVATE_EC2_IP} '
+                        -J ec2-user@${BASTION_PUBLIC_IP} \
+                        ec2-user@${PRIVATE_EC2_IP} '
 
-                            cd ${DEPLOY_DIR}/backend-api
+                            set -e
 
+                            RELEASE_DIR=${APP_BASE_DIR}/releases/${release}
+                            CURRENT_DIR=${APP_BASE_DIR}/current
+
+                            cd \$RELEASE_DIR/backend-api
+
+                            echo "Creating virtual environment..."
                             python3 -m venv venv || true
                             source venv/bin/activate
 
                             pip install --upgrade pip
-                            pip install --no-cache-dir -r requirements.txt
+                            pip install -r requirements.txt
+
+                            echo "Installing systemd service..."
+                            sudo cp fastapi.service /etc/systemd/system/fruit.service
+                            sudo systemctl daemon-reload
+
+                            echo "Switching symlink..."
+                            ln -sfn \$RELEASE_DIR \$CURRENT_DIR
+
+                            echo "Restarting service..."
+                            sudo systemctl restart fruit.service
                         '
+                        """
+
+                        // Health check
+                        sh """
+                        echo "Running health check..."
+                        sleep 5
+
+                        ssh -o StrictHostKeyChecking=no \
+                        -J ec2-user@${BASTION_PUBLIC_IP} \
+                        ec2-user@${PRIVATE_EC2_IP} '
+                            curl -f http://localhost:${APP_PORT}/docs > /dev/null
+                        '
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Cleanup Old Releases') {
+            steps {
+                sshagent([env.SSH_CRED]) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no \
+                    -J ec2-user@${BASTION_PUBLIC_IP} \
+                    ec2-user@${PRIVATE_EC2_IP} '
+                        cd ${APP_BASE_DIR}/releases
+                        ls -dt */ | tail -n +6 | xargs -r rm -rf
+                    '
                     """
                 }
             }
@@ -95,10 +129,10 @@ psycopg[binary]" > backend-api/requirements.txt
 
     post {
         success {
-            echo 'Deployment completed successfully!'
+            echo '✅ Deployment successful and verified!'
         }
         failure {
-            echo 'Deployment failed. Check logs for details.'
+            echo '❌ Deployment failed! Manual investigation required.'
         }
     }
 }
